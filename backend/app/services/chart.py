@@ -3,10 +3,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.field_specs import CHART_COLUMNS, CHART_FIELD_METADATA_FIELDS, CHART_OPTIONAL_FIELDS
 from app.store import store
 
 MODULE = "chart"
 REQUIRED_FIELDS = ["图表编号", "图表名称", "图表类型"]
+# 可选字段只在调用方提交时保存，旧调用方不提交就不会出现在输出里。
+OPTIONAL_FIELDS = list(dict.fromkeys(
+    CHART_OPTIONAL_FIELDS + CHART_FIELD_METADATA_FIELDS + CHART_COLUMNS
+))
 STATUS_ORDER = ["草稿", "已配置", "已发布", "已停用"]
 ACTION_RULES = {"保存配置": "已配置", "发布图表": "已发布", "停用图表": "已停用"}
 NEGATIVE_ACTIONS = ["停用图表"]
@@ -44,6 +49,13 @@ class ChartService:
         rows = store.rows(MODULE)
         entry = {"id": max((int(row.get("id", 0)) for row in rows), default=0) + 1}
         entry.update({field: values.get(field) for field in REQUIRED_FIELDS})
+        # 字段元数据（数据来源、坐标字段、字段列表/类型/别名等）随登记一起收下，
+        # 供图表消费字段字典区分同名不同来源的字段。
+        for field in OPTIONAL_FIELDS:
+            if field in REQUIRED_FIELDS:
+                continue
+            if values.get(field) is not None:
+                entry[field] = values.get(field)
         entry["status"] = STATUS_ORDER[0]
         entry["pending"] = True
         entry["abnormal"] = False

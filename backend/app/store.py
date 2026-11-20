@@ -11,6 +11,10 @@ from app.seed import SEED_ROWS
 
 class Store:
     def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        """把内存表恢复到示例数据，测试或本地调试时可以反复调用。"""
         self._tables: dict[str, list[dict[str, Any]]] = {
             name: [dict(row) for row in rows] for name, rows in SEED_ROWS.items()
         }

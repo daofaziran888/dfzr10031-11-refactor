@@ -47,6 +47,7 @@
             >
               {{ action }}
             </button>
+            <button class="link" type="button" @click="loadBindings(row)">查看横轴绑定</button>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -59,6 +60,35 @@
       <span>共 {{ total }} 条数据看板记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
+
+    <section v-if="bindingItems.length || unboundItems.length || reviewItems.length" class="binding-panel">
+      <h3>横轴绑定（按图表消费字段字典生成）</h3>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>来源</th><th>图表编号</th><th>横轴</th><th>字段名</th><th>类型</th><th>可求和</th><th>状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(item, index) in bindingItems" :key="index">
+            <td>{{ item.来源 }}</td>
+            <td>{{ item.图表编号 }}</td>
+            <td>{{ item.横轴 }}</td>
+            <td>{{ item.字段名 }}</td>
+            <td>{{ item.类型 }}</td>
+            <td>{{ item.可求和 ? '是' : '否' }}</td>
+            <td>{{ item.状态 }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-if="unboundItems.length" class="error-text">
+        未绑定：{{ unboundItems.map((item) => `${item.横轴}（${item.未绑定原因}）`).join('、') }}
+      </p>
+      <p v-if="reviewItems.length" class="error-text">
+        名称碰撞待复核：{{ reviewItems.map((item) => item.字段名).join('、') }}
+      </p>
+      <p v-if="bindingMessage" class="error-text">{{ bindingMessage }}</p>
+    </section>
 
     <Teleport to="body">
       <div v-if="showCreateModal" class="modal-overlay" @click.self="showCreateModal = false">
@@ -87,11 +117,14 @@
 import { onMounted, ref } from 'vue'
 
 import { request } from '@/api/client'
+import { DASHBOARD_COLUMNS } from '@/api/fieldSpecs'
 
 type Row = Record<string, string | number | null>
 
+type BindingItem = Record<string, unknown>
+
 const ENDPOINT = '/api/dashboard'
-const columns = ["看板编号", "看板名称", "包含图表", "数据刷新", "可见范围", "创建人", "创建时间", "看板状态"]
+const columns = [...DASHBOARD_COLUMNS]
 const actions = ["完成配置", "发布看板", "下线看板"]
 const statuses = ["待配置", "已发布", "展示中", "已下线"]
 const stats = [{"label": "展示中看板", "value": 0}, {"label": "待配置看板", "value": 0}, {"label": "已下线看板", "value": 0}]
@@ -103,6 +136,10 @@ const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
 const showCreateModal = ref(false)
 const createFields = ref<Record<string, string>>({})
+const bindingItems = ref<BindingItem[]>([])
+const unboundItems = ref<BindingItem[]>([])
+const reviewItems = ref<BindingItem[]>([])
+const bindingMessage = ref('')
 
 function updateStats() {
   const data = rows.value
@@ -141,6 +178,22 @@ async function submitCreate() {
     await reload()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '登记失败'
+  }
+}
+
+async function loadBindings(row: Row) {
+  bindingMessage.value = ''
+  try {
+    const response = await request(`${ENDPOINT}/${row.id}/axis-bindings`)
+    if (!response.ok) {
+      throw new Error('横轴绑定生成失败')
+    }
+    const payload = await response.json()
+    bindingItems.value = payload.items ?? []
+    unboundItems.value = payload['未绑定项'] ?? []
+    reviewItems.value = payload['待复核项'] ?? []
+  } catch (error) {
+    bindingMessage.value = error instanceof Error ? error.message : '横轴绑定生成失败'
   }
 }
 

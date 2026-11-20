@@ -60,6 +60,54 @@
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
 
+    <section class="field-dictionary">
+      <header class="field-dict-head">
+        <div>
+          <h3>图表消费字段字典</h3>
+          <p class="page-desc">同一显示名可能来自不同图表：这里按来源和图表编号列出类型、别名与可聚合口径。</p>
+        </div>
+        <div class="page-actions">
+          <button class="btn" type="button" @click="exportFields">导出字段字典</button>
+        </div>
+      </header>
+
+      <form class="filter-bar" @submit.prevent="reloadFields">
+        <label class="filter-item">
+          <span>字段名或别名</span>
+          <input v-model="fieldKeyword" placeholder="按字段名或别名检索" />
+        </label>
+        <label class="filter-item">
+          <span>类型</span>
+          <select v-model="fieldType">
+            <option value="">全部</option>
+            <option value="数值">数值</option>
+            <option value="字符">字符</option>
+          </select>
+        </label>
+        <button class="btn" type="submit">查询字段</button>
+        <button class="btn ghost" type="button" @click="resetFieldFilters">重置字段条件</button>
+      </form>
+
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th v-for="column in fieldColumns" :key="column">{{ column }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(row, index) in fieldRows" :key="`${row.图表编号}-${row.字段名}-${index}`">
+            <td v-for="column in fieldColumns" :key="column">{{ formatFieldValue((row as FieldRow)[column]) }}</td>
+          </tr>
+          <tr v-if="!fieldRows.length">
+            <td :colspan="fieldColumns.length" class="empty-state">暂无字段字典数据</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-if="fieldReviews.length" class="error-text">
+        名称碰撞待复核：{{ fieldReviews.map((item) => item.字段名).join('、') }}
+      </p>
+    </section>
+
     <Teleport to="body">
       <div v-if="showCreateModal" class="modal-overlay" @click.self="showCreateModal = false">
         <div class="modal-card">
@@ -87,11 +135,16 @@
 import { onMounted, ref } from 'vue'
 
 import { request } from '@/api/client'
+import { CHART_COLUMNS, CHART_FIELD_COLUMNS, formatFieldValue } from '@/api/fieldSpecs'
 
 type Row = Record<string, string | number | null>
 
+type FieldRow = Record<string, unknown>
+
 const ENDPOINT = '/api/chart'
-const columns = ["图表编号", "图表名称", "图表类型", "数据来源", "坐标字段", "聚合方式", "颜色方案", "图表状态"]
+const FIELDS_ENDPOINT = '/api/chart/fields'
+const columns = [...CHART_COLUMNS]
+const fieldColumns = [...CHART_FIELD_COLUMNS]
 const actions = ["保存配置", "发布图表", "停用图表"]
 const statuses = ["草稿", "已配置", "已发布", "已停用"]
 const stats = [{"label": "已发布图表", "value": 0}, {"label": "草稿图表", "value": 0}, {"label": "停用图表", "value": 0}]
@@ -103,6 +156,10 @@ const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
 const showCreateModal = ref(false)
 const createFields = ref<Record<string, string>>({})
+const fieldRows = ref<FieldRow[]>([])
+const fieldKeyword = ref('')
+const fieldType = ref('')
+const fieldReviews = ref<Record<string, unknown>[]>([])
 
 function updateStats() {
   const data = rows.value
@@ -118,6 +175,34 @@ function resetFilters() {
 
 function exportRows() {
   window.open(`${ENDPOINT}/export`, '_blank')
+}
+
+function exportFields() {
+  window.open(`${FIELDS_ENDPOINT}/export`, '_blank')
+}
+
+function resetFieldFilters() {
+  fieldKeyword.value = ''
+  fieldType.value = ''
+  void reloadFields()
+}
+
+async function reloadFields() {
+  const query = new URLSearchParams()
+  if (fieldKeyword.value.trim()) query.set('keyword', fieldKeyword.value.trim())
+  if (fieldType.value) query.set('field_type', fieldType.value)
+  try {
+    const [response, reviews] = await Promise.all([
+      request(`${FIELDS_ENDPOINT}?${query.toString()}`),
+      request(`${FIELDS_ENDPOINT}/reviews`),
+    ])
+    const payload = response.ok ? await response.json() : { items: [] }
+    fieldRows.value = payload.items ?? []
+    const reviewPayload = reviews.ok ? await reviews.json() : { items: [] }
+    fieldReviews.value = reviewPayload.items ?? []
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '字段字典读取失败'
+  }
 }
 
 function openCreate() {
@@ -177,5 +262,8 @@ async function reload() {
   }
 }
 
-onMounted(reload)
+onMounted(() => {
+  void reload()
+  void reloadFields()
+})
 </script>

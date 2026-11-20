@@ -5,14 +5,21 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from app.field_specs import DASHBOARD_COLUMNS
 from app.schemas import ActionResult, EntryPayload, PageResult
+from app.services.chart_fields import (
+    confirm_axis_bindings,
+    generate_axis_bindings,
+    stored_bindings,
+)
 from app.services.dashboard import DashboardService
 
 router = APIRouter(prefix="/api/dashboard", tags=["数据看板"])
 
 service = DashboardService()
 
-LIST_FIELDS = ["看板编号", "看板名称", "包含图表", "数据刷新", "可见范围", "创建人", "创建时间", "看板状态"]
+# 列字段说明统一维护在 app/field_specs.py，列表、导出和字段字典共用同一份顺序。
+LIST_FIELDS = list(DASHBOARD_COLUMNS)
 STATUSES = ["待配置", "已发布", "展示中", "已下线"]
 
 
@@ -21,6 +28,41 @@ def export_entries() -> dict[str, Any]:
     """导出数据看板清单：返回当前过滤条件下的全量数据。"""
     items, total = service.list_entries(page=1, size=10000)
     return {"module": "dashboard", "total": total, "items": items}
+
+
+@router.get("/{entry_id}/axis-bindings")
+def axis_bindings(entry_id: int) -> dict[str, Any]:
+    """按图表消费字段字典预览看板的横轴绑定，不改动看板状态。"""
+    entry = service.get_entry(entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"看板配置 {entry_id} 不存在或已归档")
+    return generate_axis_bindings(entry)
+
+
+@router.post("/{entry_id}/axis-bindings", response_model=ActionResult)
+def confirm_bindings(entry_id: int, payload: EntryPayload) -> ActionResult:
+    """提交坐标绑定；同一看板同一来源字段重复提交只记一次确认关系。"""
+    entry = service.get_entry(entry_id)
+    if entry is None:
+        return ActionResult(ok=False, message=f"看板配置 {entry_id} 不存在或已归档")
+    result = confirm_axis_bindings(entry, payload.values)
+    created = int(result.get("新增确认", 0))
+    unbound = len(result.get("未绑定项") or [])
+    message = f"坐标绑定已确认 {created} 条"
+    if unbound:
+        message += f"，{unbound} 条未绑定"
+    return ActionResult(ok=True, message=message, entry=result)
+
+
+@router.get("/{entry_id}/axis-bindings/confirmed")
+def list_confirmed_bindings(entry_id: int) -> dict[str, Any]:
+    """读取看板已落库的确认关系，供排查重复提交与同名字段。"""
+    entry = service.get_entry(entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"看板配置 {entry_id} 不存在或已归档")
+    dashboard_code = str(entry.get("看板编号") or entry.get("id"))
+    items = stored_bindings(dashboard_code)
+    return {"看板编号": dashboard_code, "total": len(items), "items": items}
 
 
 @router.get("", response_model=PageResult[dict])

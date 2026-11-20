@@ -3,10 +3,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.field_specs import DASHBOARD_COLUMNS
 from app.store import store
 
 MODULE = "dashboard"
 REQUIRED_FIELDS = ["看板编号", "看板名称", "包含图表"]
+# 可选字段只在调用方提交时保存，历史看板的旧键（例如已更正的坐标字段名）保持原样。
+OPTIONAL_FIELDS = list(DASHBOARD_COLUMNS)
 STATUS_ORDER = ["待配置", "已发布", "展示中", "已下线"]
 ACTION_RULES = {"完成配置": "已发布", "发布看板": "展示中", "下线看板": "已下线"}
 NEGATIVE_ACTIONS = ["下线看板"]
@@ -44,6 +47,15 @@ class DashboardService:
         rows = store.rows(MODULE)
         entry = {"id": max((int(row.get("id", 0)) for row in rows), default=0) + 1}
         entry.update({field: values.get(field) for field in REQUIRED_FIELDS})
+        for field in OPTIONAL_FIELDS:
+            if field in REQUIRED_FIELDS:
+                continue
+            if values.get(field) is not None:
+                entry[field] = values.get(field)
+        # 坐标绑定是看板自身状态，原样保留调用方写法（包括更正前的旧字段名）。
+        for field in ("坐标绑定", "横轴绑定", "坐标字段", "横轴字段"):
+            if values.get(field) is not None:
+                entry[field] = values.get(field)
         entry["status"] = STATUS_ORDER[0]
         entry["pending"] = True
         entry["abnormal"] = False
